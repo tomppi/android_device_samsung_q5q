@@ -5,8 +5,8 @@
 #
 
 # Halium 15 board configuration for q5q.
-# Keep the current SM8550 partition and boot-image definitions, then apply
-# only the overrides required for a Halium ramdisk and unlocked bootloader.
+# Keep the current SM8550 partition, GKI, and boot-image definitions, then
+# apply only the overrides required for an unlocked Halium development build.
 include device/samsung/sm8550-common/BoardConfigCommon.mk
 
 DEVICE_PATH := device/samsung/q5q
@@ -61,18 +61,16 @@ TARGET_KERNEL_EXT_MODULES := \
   qcom/opensource/bt-kernel
 
 # Halium boot arguments. The common tree already supplies the q5q USB,
-# firmware, boot-header-v4, init_boot, vendor_boot and partition settings.
+# firmware, boot-header-v4, GKI, init_boot, vendor_boot and partition settings.
 BOARD_KERNEL_CMDLINE += \
     console=tty0 \
     androidboot.selinux=permissive \
     androidboot.veritymode=disabled \
     androidboot.halium=1
 
-# Halium supplies its own ramdisk. Keep AVB disabled only on this branch.
+# Development image policy. Ramdisk placement remains inherited from the
+# current q5q GKI layout until boot/init_boot/vendor_boot packaging is proven.
 BOARD_AVB_ENABLE := false
-BOARD_USES_GENERIC_KERNEL_IMAGE := false
-BOARD_INCLUDE_RECOVERY_DTBO := false
-BOARD_MOVE_GSI_AVB_KEYS_TO_VENDOR_BOOT := false
 PRODUCT_SUPPORTS_VERITY := false
 PRODUCT_SUPPORTS_VERITY_FEC := false
 
