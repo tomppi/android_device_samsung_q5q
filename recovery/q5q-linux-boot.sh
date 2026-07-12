@@ -205,6 +205,9 @@ validate_sums_manifest() {
     while IFS= read -r line || [ -n "$line" ]; do
         [ -n "$line" ] || die "SHA256SUMS contains a blank line"
 
+        # Intentional field splitting: sha256sum manifests contain a digest and
+        # one filename, and glob expansion is disabled globally with `set -f`.
+        # shellcheck disable=SC2086
         set -- $line
         [ "$#" -eq 2 ] || die "malformed SHA256SUMS line"
 
@@ -246,12 +249,15 @@ validate_cmdline() {
     [ "$cmdline_size" -le "$MAX_CMDLINE_BYTES" ] ||
         die "kernel command line is too large"
 
+    cmdline_lines="$(grep -c '^' "$CMDLINE_FILE" 2>/dev/null || true)"
+    [ "$cmdline_lines" -eq 1 ] || die "kernel command line must be exactly one line"
+
     VALIDATED_CMDLINE="$(tr -d '\r\n' < "$CMDLINE_FILE")"
     [ -n "$VALIDATED_CMDLINE" ] || die "kernel command line is empty"
 
     removed_bytes=$((cmdline_size - ${#VALIDATED_CMDLINE}))
     [ "$removed_bytes" -eq 0 ] || [ "$removed_bytes" -eq 1 ] ||
-        die "kernel command line must be exactly one line"
+        die "kernel command line contains carriage returns or extra newlines"
 
     if printf '%s' "$VALIDATED_CMDLINE" | grep -q '[[:cntrl:]]' 2>/dev/null; then
         die "kernel command line contains control characters"
