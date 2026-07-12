@@ -9,3 +9,10 @@ prebuilt_etc {
     sub_dir: "init/hw",
     vendor: true,
 }
+
+prebuilt_etc {
+    name: "init.halium.q5q.rc",
+    src: "init.halium.q5q.rc",
+    sub_dir: "init",
+    vendor: true,
+}
