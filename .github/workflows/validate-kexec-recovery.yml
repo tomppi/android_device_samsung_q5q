@@ -58,6 +58,11 @@ jobs:
           grep -q 'q5q_halium_debug.fragment' BoardConfig.mk
           grep -Fq '$(TARGET_COPY_OUT_RECOVERY)/root/system/bin/q5q-linux-boot' \
             lineage_q5q_kexec.mk
+          if grep -Eq '^[[:space:]]*PRODUCT_SUPPORTS_VERITY(_FEC)?[[:space:]]*:=' \
+            BoardConfig.mk; then
+            echo "Android 16 rejects legacy PRODUCT_SUPPORTS_VERITY variables." >&2
+            exit 1
+          fi
 
       - name: Check launcher safety boundary
         run: |
