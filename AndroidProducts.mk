@@ -6,11 +6,13 @@
 
 PRODUCT_MAKEFILES := \
     $(LOCAL_DIR)/lineage_q5q.mk \
+    $(LOCAL_DIR)/lineage_q5q_kexec.mk \
     $(LOCAL_DIR)/halium_q5q.mk
 
 COMMON_LUNCH_CHOICES := \
     lineage_q5q-eng \
     lineage_q5q-user \
     lineage_q5q-userdebug \
+    lineage_q5q_kexec-userdebug \
     halium_q5q-userdebug \
     halium_q5q-ap2a-userdebug
