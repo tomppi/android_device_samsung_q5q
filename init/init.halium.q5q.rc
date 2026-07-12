@@ -1,0 +1,35 @@
+# Halium bring-up hooks for Samsung Galaxy Z Fold5 (q5q).
+# Development-only: SELinux/verity are disabled by the Halium board config.
+
+on early-init
+    write /proc/sys/kernel/sysrq 1
+
+on init
+    # libhybris/LXC binder access. These nodes may be symlinks into binderfs.
+    chmod 0666 /dev/binder
+    chmod 0666 /dev/hwbinder
+    chmod 0666 /dev/vndbinder
+    chmod 0666 /dev/binderfs/binder
+    chmod 0666 /dev/binderfs/hwbinder
+    chmod 0666 /dev/binderfs/vndbinder
+
+on post-fs
+    mkdir /android 0755 root root
+    mkdir /halium 0755 root root
+
+on post-fs-data
+    # Fold/cover state exported by Samsung's downstream kernel.
+    chmod 0444 /sys/class/sec/hall_ic/hall_detect
+    chown system input /sys/class/sec/hall_ic/hall_detect
+    chmod 0444 /sys/class/sec/sec_flip/flip_status
+    chown system input /sys/class/sec/sec_flip/flip_status
+
+    mkdir /data/halium 0755 system system
+    mkdir /data/halium/displays 0755 system system
+
+on boot
+    # Bind a framebuffer console when the kernel exposes vtcon1.
+    write /sys/class/vtconsole/vtcon1/bind 1
+
+    # Reuse the existing foldable touch service when its vendor rc is present.
+    start vendor.touch-hal
