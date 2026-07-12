@@ -18,8 +18,9 @@ TARGET_OTA_ASSERT_DEVICE := q5q
 TARGET_SCREEN_DENSITY := 420
 
 # Kernel: build from the checked-out source tree; never use an absolute path.
-TARGET_KERNEL_CONFIG := q5q_defconfig
-TARGET_KERNEL_ADDITIONAL_CONFIG := q5q_halium.fragment
+# Lineage 23.2 treats TARGET_KERNEL_CONFIG as a list: first the base defconfig,
+# then any fragments that should be merged into the final .config.
+TARGET_KERNEL_CONFIG := q5q_defconfig q5q_halium.fragment
 
 # Kernel modules
 BOARD_SYSTEM_KERNEL_MODULES := $(strip $(shell cat $(DEVICE_PATH)/modules.load.system_dlkm))
