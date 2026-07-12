@@ -1,0 +1,37 @@
+name: Validate q5q kexec recovery
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+      - name: Check launcher syntax
+        run: sh -n recovery/q5q-linux-boot.sh
+      - name: Check product registration
+        run: |
+          grep -q 'lineage_q5q_kexec.mk' AndroidProducts.mk
+          grep -q 'lineage_q5q_kexec-userdebug' AndroidProducts.mk
+          grep -q 'q5q_halium_debug.fragment' BoardConfig.mk
+          grep -q 'q5q-linux-boot' lineage_q5q_kexec.mk
+      - name: Check launcher safety boundary
+        run: |
+          if grep -En \
+            'fastboot[[:space:]]+(flash|erase|format)|heimdall[[:space:]]+flash|dd[[:space:]].*of=/dev/block' \
+            recovery/q5q-linux-boot.sh; then
+            echo "Recovery launcher must not contain partition-write commands." >&2
+            exit 1
+          fi
+      - name: Check explicit execution confirmation
+        run: |
+          grep -q -- '--execute requires the literal second argument --confirm' \
+            recovery/q5q-linux-boot.sh
+          grep -q 'payload changed after it was loaded' recovery/q5q-linux-boot.sh
