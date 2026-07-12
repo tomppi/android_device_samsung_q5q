@@ -1,0 +1,48 @@
+# Halium device metadata for Samsung Galaxy Z Fold5 (q5q / SM-F946B).
+# Pre-alpha: values marked TODO must be verified on the target phone.
+
+deviceinfo_name="Samsung Galaxy Z Fold5"
+deviceinfo_manufacturer="Samsung"
+deviceinfo_codename="q5q"
+deviceinfo_year="2023"
+
+deviceinfo_arch="aarch64"
+deviceinfo_chassis="handset"
+deviceinfo_soc="qcom-sm8550"
+deviceinfo_halium="15"
+
+# Main unfolded display. Cover display is 904x2316 and needs separate
+# compositor/session configuration.
+deviceinfo_screen_width="1812"
+deviceinfo_screen_height="2176"
+deviceinfo_dev_pixels_per_unit="2.625"
+deviceinfo_screen_full_height="true"
+
+# q5q normal boot layout is Android boot header v4 with init_boot and
+# vendor_boot. Recovery uses a different image format and must be packaged
+# separately; do not reuse recovery offsets for boot.img.
+deviceinfo_bootimg_qcdt="false"
+deviceinfo_bootimg_blobpack="false"
+deviceinfo_header_version="4"
+deviceinfo_flash_pagesize="4096"
+deviceinfo_kernel_cmdline="console=tty0 androidboot.veritymode=disabled androidboot.selinux=permissive androidboot.halium=1"
+
+deviceinfo_kernel_partition="boot"
+deviceinfo_recovery_partition="recovery"
+deviceinfo_system_partition="system"
+deviceinfo_userdata_partition="userdata"
+deviceinfo_super_partition="super"
+deviceinfo_super_partition_size="12100567040"
+
+# Samsung devices are restored through Download Mode/Odin-compatible tooling,
+# not assumed to support fastboot boot/flash. Flashing remains manual until
+# the exact image layout is validated from device dumps.
+
+deviceinfo_keyboard="false"
+deviceinfo_external_storage="false"
+deviceinfo_foldable="true"
+deviceinfo_hall_sensor_path="/sys/class/sec/hall_ic/hall_detect"
+
+deviceinfo_modem="qmi"
+deviceinfo_wifi_chip="qcom-wcn7850"
+deviceinfo_bluetooth_chip="qcom-wcn7850"
