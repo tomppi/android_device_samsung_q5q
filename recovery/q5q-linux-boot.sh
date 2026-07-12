@@ -39,8 +39,9 @@ case "$PAYLOAD_DIR" in
     /tmp/*) ;;
     *) fatal_early "resolved payload directory escaped /tmp" ;;
 esac
-[ -d "$PAYLOAD_DIR" ] && [ ! -L "$PAYLOAD_DIR" ] ||
+if [ ! -d "$PAYLOAD_DIR" ] || [ -L "$PAYLOAD_DIR" ]; then
     fatal_early "payload directory is not a real directory"
+fi
 chmod 0700 "$PAYLOAD_DIR" || fatal_early "could not secure payload directory"
 
 LOG_FILE="$PAYLOAD_DIR/q5q-linux-boot.log"
