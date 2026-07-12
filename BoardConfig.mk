@@ -22,6 +22,13 @@ TARGET_SCREEN_DENSITY := 420
 # then any fragments that should be merged into the final .config.
 TARGET_KERNEL_CONFIG := q5q_defconfig q5q_halium.fragment
 
+# The dedicated recovery product requests the development-only kexec/pstore
+# fragment. Ordinary q5q and Halium products remain unchanged.
+ifneq ($(filter lineage_q5q_kexec,$(TARGET_PRODUCT)),)
+TARGET_KERNEL_CONFIG += q5q_halium_debug.fragment
+BOARD_KERNEL_CMDLINE += panic=10 ignore_loglevel
+endif
+
 # Kernel modules
 BOARD_SYSTEM_KERNEL_MODULES := $(strip $(shell cat $(DEVICE_PATH)/modules.load.system_dlkm))
 BOARD_SYSTEM_KERNEL_MODULES_LOAD := $(strip $(shell cat $(DEVICE_PATH)/modules.load.system_dlkm))
