@@ -12,4 +12,5 @@ COMMON_LUNCH_CHOICES := \
     lineage_q5q-eng \
     lineage_q5q-user \
     lineage_q5q-userdebug \
+    halium_q5q-userdebug \
     halium_q5q-ap2a-userdebug
