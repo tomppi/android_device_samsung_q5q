@@ -69,6 +69,11 @@ jobs:
           grep -q 'must contain exactly the five required payload files' \
             recovery/q5q-linux-boot.sh
           grep -q 'rolling back the loaded image' recovery/q5q-linux-boot.sh
+          grep -q '^verify_manifest_entry()' recovery/q5q-linux-boot.sh
+          grep -A18 '^unload_payload()' recovery/q5q-linux-boot.sh \
+            | grep -q 'verify_manifest_entry'
+          grep -A25 '^execute_payload()' recovery/q5q-linux-boot.sh \
+            | grep -q 'verify_manifest_entry'
           if grep -q '/system/bin/kexec\|/sbin/kexec' recovery/q5q-linux-boot.sh; then
             echo "The launcher must use only the hash-verified payload kexec binary." >&2
             exit 1
