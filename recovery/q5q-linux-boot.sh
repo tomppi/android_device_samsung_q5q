@@ -42,6 +42,7 @@ esac
 if [ ! -d "$PAYLOAD_DIR" ] || [ -L "$PAYLOAD_DIR" ]; then
     fatal_early "payload directory is not a real directory"
 fi
+chmod 0700 "$PAYLOAD_DIR" || fatal_early "could not secure payload directory"
 
 LOG_FILE="$PAYLOAD_DIR/q5q-linux-boot.log"
 STATE_FILE="$PAYLOAD_DIR/.q5q-loaded.sha256"
@@ -55,10 +56,9 @@ KEXEC_BIN="$PAYLOAD_DIR/kexec"
 safe_output_path() {
     output="$1"
 
-    if [ -e "$output" ]; then
-        if [ ! -f "$output" ] || [ -L "$output" ]; then
-            fatal_early "refusing unsafe output path: $output"
-        fi
+    [ ! -L "$output" ] || fatal_early "refusing symlink output path: $output"
+    if [ -e "$output" ] && [ ! -f "$output" ]; then
+        fatal_early "refusing non-file output path: $output"
     fi
 }
 
