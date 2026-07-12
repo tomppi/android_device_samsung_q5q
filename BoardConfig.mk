@@ -19,6 +19,7 @@ TARGET_SCREEN_DENSITY := 420
 
 # Kernel: build from the checked-out source tree; never use an absolute path.
 TARGET_KERNEL_CONFIG := q5q_defconfig
+TARGET_KERNEL_ADDITIONAL_CONFIG := q5q_halium.fragment
 
 # Kernel modules
 BOARD_SYSTEM_KERNEL_MODULES := $(strip $(shell cat $(DEVICE_PATH)/modules.load.system_dlkm))
