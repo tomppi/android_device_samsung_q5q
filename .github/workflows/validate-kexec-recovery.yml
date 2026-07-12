@@ -18,10 +18,12 @@ jobs:
       - name: Install shell validation tools
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq shellcheck
+          sudo apt-get install -y -qq shellcheck util-linux
 
-      - name: Check launcher syntax
-        run: sh -n recovery/q5q-linux-boot.sh
+      - name: Check launcher and test syntax
+        run: |
+          sh -n recovery/q5q-linux-boot.sh
+          bash -n recovery/test-q5q-linux-boot.sh
 
       - name: Lint launcher
         id: lint_launcher
@@ -35,6 +37,9 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit "$status"
 
+      - name: Lint launcher behavioral test
+        run: shellcheck recovery/test-q5q-linux-boot.sh
+
       - name: Upload launcher lint diagnostics
         if: always() && steps.lint_launcher.outputs.status != '0'
         uses: actions/upload-artifact@v4
@@ -42,6 +47,9 @@ jobs:
           name: q5q-launcher-shellcheck
           path: q5q-launcher-shellcheck.txt
           if-no-files-found: error
+
+      - name: Exercise launcher safety behavior
+        run: bash recovery/test-q5q-linux-boot.sh
 
       - name: Check product registration and recovery path
         run: |
