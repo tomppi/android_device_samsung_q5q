@@ -77,9 +77,9 @@ BOARD_KERNEL_CMDLINE += \
 
 # Development image policy. Ramdisk placement remains inherited from the
 # current q5q GKI layout until boot/init_boot/vendor_boot packaging is proven.
+# Android 16 no longer accepts the legacy PRODUCT_SUPPORTS_VERITY variables;
+# the inherited AVB 2.0 configuration is controlled only through BOARD_AVB_*.
 BOARD_AVB_ENABLE := false
-PRODUCT_SUPPORTS_VERITY := false
-PRODUCT_SUPPORTS_VERITY_FEC := false
 
 # Recovery remains available as a separate build target.
 TARGET_RECOVERY_DEFAULT_ROTATION := ROTATION_LEFT
