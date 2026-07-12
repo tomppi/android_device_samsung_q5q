@@ -3,8 +3,8 @@
 # q5q recovery-side second-kernel launcher
 #
 # This tool never writes a partition. It validates files in a temporary payload
-# directory, asks kexec-tools to load them into RAM, and executes only after a
-# separate explicitly confirmed command.
+# directory, asks the hash-verified payload kexec to load them into RAM, and
+# executes only after a separate explicitly confirmed command.
 #
 
 set -eu
@@ -39,9 +39,8 @@ case "$PAYLOAD_DIR" in
     /tmp/*) ;;
     *) fatal_early "resolved payload directory escaped /tmp" ;;
 esac
-if [ ! -d "$PAYLOAD_DIR" ] || [ -L "$PAYLOAD_DIR" ]; then
+[ -d "$PAYLOAD_DIR" ] && [ ! -L "$PAYLOAD_DIR" ] ||
     fatal_early "payload directory is not a real directory"
-fi
 chmod 0700 "$PAYLOAD_DIR" || fatal_early "could not secure payload directory"
 
 LOG_FILE="$PAYLOAD_DIR/q5q-linux-boot.log"
@@ -54,11 +53,11 @@ SUMS_FILE="$PAYLOAD_DIR/SHA256SUMS"
 KEXEC_BIN="$PAYLOAD_DIR/kexec"
 
 safe_output_path() {
-    output="$1"
-
-    [ ! -L "$output" ] || fatal_early "refusing symlink output path: $output"
-    if [ -e "$output" ] && [ ! -f "$output" ]; then
-        fatal_early "refusing non-file output path: $output"
+    output_path="$1"
+    [ ! -L "$output_path" ] ||
+        fatal_early "refusing symlink output path: $output_path"
+    if [ -e "$output_path" ] && [ ! -f "$output_path" ]; then
+        fatal_early "refusing non-file output path: $output_path"
     fi
 }
 
@@ -79,7 +78,7 @@ die() {
 }
 
 usage() {
-    cat <<EOF
+    cat <<EOF_USAGE
 Usage:
   q5q-linux-boot --check
   q5q-linux-boot --load
@@ -99,30 +98,28 @@ Required files:
   SHA256SUMS
 
 No command in this launcher writes a block-device partition.
-EOF
+EOF_USAGE
 }
 
 file_size() {
     stat -c '%s' "$1" 2>/dev/null ||
-        wc -c < "$1" |
-        tr -d ' '
+        wc -c < "$1" | tr -d ' '
 }
 
 require_regular_file() {
-    file="$1"
-    limit="$2"
+    checked_file="$1"
+    size_limit="$2"
 
-    [ -f "$file" ] || die "missing regular file: $file"
-    [ ! -L "$file" ] || die "symlinks are not accepted: $file"
+    [ -f "$checked_file" ] || die "missing regular file: $checked_file"
+    [ ! -L "$checked_file" ] || die "symlinks are not accepted: $checked_file"
 
-    size="$(file_size "$file")"
-    case "$size" in
-        ''|*[!0-9]*) die "could not determine file size: $file" ;;
+    checked_size="$(file_size "$checked_file")"
+    case "$checked_size" in
+        ''|*[!0-9]*) die "could not determine file size: $checked_file" ;;
     esac
-
-    [ "$size" -gt 0 ] || die "empty file: $file"
-    [ "$size" -le "$limit" ] ||
-        die "file exceeds safety limit ($size > $limit): $file"
+    [ "$checked_size" -gt 0 ] || die "empty file: $checked_file"
+    [ "$checked_size" -le "$size_limit" ] ||
+        die "file exceeds safety limit ($checked_size > $size_limit): $checked_file"
 }
 
 require_root() {
@@ -130,9 +127,9 @@ require_root() {
 }
 
 device_is_q5q() {
-    for prop in ro.product.device ro.product.vendor.device ro.product.system.device; do
-        value="$(getprop "$prop" 2>/dev/null || true)"
-        [ "$value" = "q5q" ] && return 0
+    for device_prop in ro.product.device ro.product.vendor.device ro.product.system.device; do
+        device_value="$(getprop "$device_prop" 2>/dev/null || true)"
+        [ "$device_value" = "q5q" ] && return 0
     done
 
     if [ -r /proc/device-tree/compatible ] &&
@@ -151,9 +148,7 @@ device_is_q5q() {
 }
 
 kernel_has_kexec() {
-    if [ -e /sys/kernel/kexec_loaded ]; then
-        return 0
-    fi
+    [ -e /sys/kernel/kexec_loaded ] && return 0
 
     if [ -r /proc/config.gz ]; then
         zcat /proc/config.gz 2>/dev/null |
@@ -164,9 +159,9 @@ kernel_has_kexec() {
 }
 
 mark_manifest_name() {
-    manifest_name="$1"
+    allowed_name="$1"
 
-    case "$manifest_name" in
+    case "$allowed_name" in
         Image)
             [ "$seen_image" -eq 0 ] || die "duplicate SHA256SUMS entry: Image"
             seen_image=1
@@ -190,7 +185,7 @@ mark_manifest_name() {
             [ "$seen_kexec" -eq 0 ] || die "duplicate SHA256SUMS entry: kexec"
             seen_kexec=1
             ;;
-        *) die "SHA256SUMS contains a disallowed path: $manifest_name" ;;
+        *) die "SHA256SUMS contains a disallowed path: $allowed_name" ;;
     esac
 }
 
@@ -204,13 +199,12 @@ validate_sums_manifest() {
     seen_kexec=0
     entry_count=0
 
-    while IFS= read -r line || [ -n "$line" ]; do
-        [ -n "$line" ] || die "SHA256SUMS contains a blank line"
+    while IFS= read -r manifest_line || [ -n "$manifest_line" ]; do
+        [ -n "$manifest_line" ] || die "SHA256SUMS contains a blank line"
 
-        # Intentional field splitting: sha256sum manifests contain a digest and
-        # one filename, and glob expansion is disabled globally with `set -f`.
+        # Intentional field splitting. Globbing is disabled globally with set -f.
         # shellcheck disable=SC2086
-        set -- $line
+        set -- $manifest_line
         [ "$#" -eq 2 ] || die "malformed SHA256SUMS line"
 
         manifest_hash="$1"
@@ -238,6 +232,40 @@ validate_sums_manifest() {
         cd "$PAYLOAD_DIR"
         sha256sum -c SHA256SUMS
     ) >> "$LOG_FILE" 2>&1 || die "payload SHA-256 verification failed"
+}
+
+verify_manifest_entry() {
+    entry_manifest="$1"
+    entry_name="$2"
+    entry_file="$3"
+    entry_expected=""
+    entry_matches=0
+
+    while IFS= read -r entry_line || [ -n "$entry_line" ]; do
+        # Intentional field splitting. Globbing is disabled globally with set -f.
+        # shellcheck disable=SC2086
+        set -- $entry_line
+        [ "$#" -eq 2 ] || continue
+        parsed_name="${2#\*}"
+        [ "$parsed_name" = "$entry_name" ] || continue
+        entry_expected="$1"
+        entry_matches=$((entry_matches + 1))
+    done < "$entry_manifest"
+
+    [ "$entry_matches" -eq 1 ] ||
+        die "manifest must contain exactly one $entry_name entry"
+    [ "${#entry_expected}" -eq 64 ] || die "manifest contains a bad $entry_name digest"
+    case "$entry_expected" in
+        *[!0-9a-fA-F]*) die "manifest contains a non-hex $entry_name digest" ;;
+    esac
+
+    entry_actual_line="$(sha256sum "$entry_file" 2>/dev/null)" ||
+        die "could not hash $entry_name"
+    # Intentional field splitting of sha256sum output.
+    # shellcheck disable=SC2086
+    set -- $entry_actual_line
+    [ "$#" -ge 1 ] || die "could not parse $entry_name digest"
+    [ "$1" = "$entry_expected" ] || die "$entry_name hash verification failed"
 }
 
 validate_dtb_identity() {
@@ -274,11 +302,11 @@ validate_payload() {
     require_regular_file "$CMDLINE_FILE" "$MAX_CMDLINE_BYTES"
     require_regular_file "$KEXEC_BIN" "$MAX_KEXEC_BYTES"
 
-    chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
-
     validate_sums_manifest
+    verify_manifest_entry "$SUMS_FILE" kexec "$KEXEC_BIN"
     validate_dtb_identity
     validate_cmdline
+    chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
 }
 
 check_environment() {
@@ -287,6 +315,7 @@ check_environment() {
     kernel_has_kexec || die "running recovery kernel does not expose kexec support"
 
     validate_payload
+    verify_manifest_entry "$SUMS_FILE" kexec "$KEXEC_BIN"
     "$KEXEC_BIN" --version >> "$LOG_FILE" 2>&1 || die "kexec binary did not run"
 
     log "environment and payload checks passed"
@@ -301,9 +330,15 @@ kexec_loaded_value() {
 }
 
 rollback_loaded_image() {
-    log "rolling back the loaded image"
-    "$KEXEC_BIN" -u >> "$LOG_FILE" 2>&1 ||
-        log "warning: kexec unload during rollback failed"
+    rollback_manifest="$1"
+
+    if (verify_manifest_entry "$rollback_manifest" kexec "$KEXEC_BIN"); then
+        log "rolling back the loaded image"
+        "$KEXEC_BIN" -u >> "$LOG_FILE" 2>&1 ||
+            log "warning: kexec unload during rollback failed"
+    else
+        log "warning: refusing rollback because payload kexec is no longer verified"
+    fi
 }
 
 create_state_manifest() {
@@ -335,13 +370,15 @@ create_state_manifest() {
 load_payload() {
     check_environment
 
-    loaded="$(kexec_loaded_value)"
-    [ "$loaded" != "1" ] || die "a kexec image is already loaded; use --unload first"
+    loaded_value="$(kexec_loaded_value)"
+    [ "$loaded_value" != "1" ] ||
+        die "a kexec image is already loaded; use --unload first"
 
     safe_output_path "$STATE_FILE"
     rm -f "$STATE_FILE"
     create_state_manifest
 
+    verify_manifest_entry "$TEMP_STATE" kexec "$KEXEC_BIN"
     log "loading q5q second-stage kernel into RAM"
     if ! "$KEXEC_BIN" -l "$IMAGE" \
         --initrd="$INITRD" \
@@ -355,28 +392,28 @@ load_payload() {
         cd "$PAYLOAD_DIR"
         sha256sum -c "${TEMP_STATE##*/}"
     ) >> "$LOG_FILE" 2>&1; then
-        rollback_loaded_image
+        rollback_loaded_image "$TEMP_STATE"
         rm -f "$TEMP_STATE"
         die "payload changed during kexec load"
     fi
 
     if ! mv "$TEMP_STATE" "$STATE_FILE"; then
-        rollback_loaded_image
+        rollback_loaded_image "$TEMP_STATE"
         rm -f "$TEMP_STATE"
         die "could not commit loaded-state manifest"
     fi
     chmod 0600 "$STATE_FILE" 2>/dev/null || true
 
-    loaded="$(kexec_loaded_value)"
-    [ "$loaded" = "1" ] ||
+    loaded_value="$(kexec_loaded_value)"
+    [ "$loaded_value" = "1" ] ||
         log "warning: the kernel does not expose /sys/kernel/kexec_loaded=1"
 
     log "payload loaded; execution still requires --execute --confirm"
 }
 
 status_payload() {
-    loaded="$(kexec_loaded_value)"
-    log "kexec_loaded=$loaded"
+    loaded_value="$(kexec_loaded_value)"
+    log "kexec_loaded=$loaded_value"
 
     if [ -e "$STATE_FILE" ]; then
         require_regular_file "$STATE_FILE" "$MAX_STATE_BYTES"
@@ -389,9 +426,18 @@ status_payload() {
 
 unload_payload() {
     require_root
+    device_is_q5q || die "device identity is not q5q"
     require_regular_file "$KEXEC_BIN" "$MAX_KEXEC_BYTES"
-    chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
 
+    if [ -e "$STATE_FILE" ]; then
+        require_regular_file "$STATE_FILE" "$MAX_STATE_BYTES"
+        verify_manifest_entry "$STATE_FILE" kexec "$KEXEC_BIN"
+    else
+        validate_sums_manifest
+        verify_manifest_entry "$SUMS_FILE" kexec "$KEXEC_BIN"
+    fi
+
+    chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
     "$KEXEC_BIN" -u >> "$LOG_FILE" 2>&1 || die "kexec unload failed"
 
     if [ -e "$STATE_FILE" ]; then
@@ -411,16 +457,17 @@ execute_payload() {
         cd "$PAYLOAD_DIR"
         sha256sum -c "${STATE_FILE##*/}"
     ) >> "$LOG_FILE" 2>&1 || die "payload changed after it was loaded"
+    verify_manifest_entry "$STATE_FILE" kexec "$KEXEC_BIN"
 
-    loaded="$(kexec_loaded_value)"
-    [ "$loaded" = "1" ] || die "kernel does not report a loaded kexec image"
+    loaded_value="$(kexec_loaded_value)"
+    [ "$loaded_value" = "1" ] || die "kernel does not report a loaded kexec image"
 
     chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
-
     log "executing the loaded second-stage kernel now"
     sync
     sleep 1
 
+    verify_manifest_entry "$STATE_FILE" kexec "$KEXEC_BIN"
     "$KEXEC_BIN" -e
     die "kexec execute returned unexpectedly"
 }
