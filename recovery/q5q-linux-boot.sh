@@ -39,8 +39,9 @@ case "$PAYLOAD_DIR" in
     /tmp/*) ;;
     *) fatal_early "resolved payload directory escaped /tmp" ;;
 esac
-[ -d "$PAYLOAD_DIR" ] && [ ! -L "$PAYLOAD_DIR" ] ||
+if [ ! -d "$PAYLOAD_DIR" ] || [ -L "$PAYLOAD_DIR" ]; then
     fatal_early "payload directory is not a real directory"
+fi
 
 LOG_FILE="$PAYLOAD_DIR/q5q-linux-boot.log"
 STATE_FILE="$PAYLOAD_DIR/.q5q-loaded.sha256"
@@ -55,8 +56,9 @@ safe_output_path() {
     output="$1"
 
     if [ -e "$output" ]; then
-        [ -f "$output" ] && [ ! -L "$output" ] ||
+        if [ ! -f "$output" ] || [ -L "$output" ]; then
             fatal_early "refusing unsafe output path: $output"
+        fi
     fi
 }
 
@@ -223,13 +225,14 @@ validate_sums_manifest() {
         entry_count=$((entry_count + 1))
     done < "$SUMS_FILE"
 
-    [ "$entry_count" -eq 5 ] &&
-    [ "$seen_image" -eq 1 ] &&
-    [ "$seen_initrd" -eq 1 ] &&
-    [ "$seen_dtb" -eq 1 ] &&
-    [ "$seen_cmdline" -eq 1 ] &&
-    [ "$seen_kexec" -eq 1 ] ||
+    if [ "$entry_count" -ne 5 ] ||
+       [ "$seen_image" -ne 1 ] ||
+       [ "$seen_initrd" -ne 1 ] ||
+       [ "$seen_dtb" -ne 1 ] ||
+       [ "$seen_cmdline" -ne 1 ] ||
+       [ "$seen_kexec" -ne 1 ]; then
         die "SHA256SUMS must contain exactly the five required payload files"
+    fi
 
     (
         cd "$PAYLOAD_DIR"
@@ -305,8 +308,9 @@ rollback_loaded_image() {
 
 create_state_manifest() {
     TEMP_STATE="$PAYLOAD_DIR/.q5q-loaded.sha256.tmp.$$"
-    [ ! -e "$TEMP_STATE" ] && [ ! -L "$TEMP_STATE" ] ||
+    if [ -e "$TEMP_STATE" ] || [ -L "$TEMP_STATE" ]; then
         die "temporary state path already exists"
+    fi
 
     (
         cd "$PAYLOAD_DIR"
@@ -439,8 +443,9 @@ case "${1:-}" in
         unload_payload
         ;;
     --execute)
-        [ "${2:-}" = "--confirm" ] && [ "$#" -eq 2 ] ||
+        if [ "${2:-}" != "--confirm" ] || [ "$#" -ne 2 ]; then
             die "--execute requires the literal second argument --confirm"
+        fi
         execute_payload
         ;;
     -h|--help|'')
