@@ -2,36 +2,73 @@
 #
 # q5q recovery-side second-kernel launcher
 #
-# This tool never writes a partition. It only validates files under PAYLOAD_DIR,
-# asks kexec-tools to load them into RAM, and executes a separately confirmed
-# handoff.
+# This tool never writes a partition. It validates files in a temporary payload
+# directory, asks kexec-tools to load them into RAM, and executes only after a
+# separate explicitly confirmed command.
 #
 
 set -eu
+set -f
+umask 077
 
 PAYLOAD_DIR="${Q5Q_PAYLOAD_DIR:-/tmp/q5q-linux}"
-LOG_FILE="$PAYLOAD_DIR/q5q-linux-boot.log"
-STATE_FILE="$PAYLOAD_DIR/.q5q-loaded.sha256"
-
-IMAGE="$PAYLOAD_DIR/Image"
-INITRD="$PAYLOAD_DIR/initramfs.cpio.gz"
-DTB="$PAYLOAD_DIR/sm8550-samsung-q5q.dtb"
-CMDLINE_FILE="$PAYLOAD_DIR/cmdline.txt"
-SUMS_FILE="$PAYLOAD_DIR/SHA256SUMS"
 
 MAX_IMAGE_BYTES=$((256 * 1024 * 1024))
 MAX_INITRD_BYTES=$((256 * 1024 * 1024))
 MAX_DTB_BYTES=$((8 * 1024 * 1024))
 MAX_CMDLINE_BYTES=4096
 MAX_KEXEC_BYTES=$((32 * 1024 * 1024))
+MAX_SUMS_BYTES=4096
+MAX_STATE_BYTES=4096
 
-mkdir -p "$PAYLOAD_DIR"
-touch "$LOG_FILE"
+fatal_early() {
+    printf 'q5q-linux-boot: ERROR: %s\n' "$*" >&2
+    exit 1
+}
+
+case "$PAYLOAD_DIR" in
+    /tmp/*) ;;
+    *) fatal_early "payload directory must be below /tmp" ;;
+esac
+
+[ ! -L "$PAYLOAD_DIR" ] || fatal_early "payload directory must not be a symlink"
+mkdir -p "$PAYLOAD_DIR" || fatal_early "could not create payload directory"
+PAYLOAD_DIR="$(readlink -f "$PAYLOAD_DIR" 2>/dev/null)" ||
+    fatal_early "could not resolve payload directory"
+case "$PAYLOAD_DIR" in
+    /tmp/*) ;;
+    *) fatal_early "resolved payload directory escaped /tmp" ;;
+esac
+[ -d "$PAYLOAD_DIR" ] && [ ! -L "$PAYLOAD_DIR" ] ||
+    fatal_early "payload directory is not a real directory"
+
+LOG_FILE="$PAYLOAD_DIR/q5q-linux-boot.log"
+STATE_FILE="$PAYLOAD_DIR/.q5q-loaded.sha256"
+IMAGE="$PAYLOAD_DIR/Image"
+INITRD="$PAYLOAD_DIR/initramfs.cpio.gz"
+DTB="$PAYLOAD_DIR/sm8550-samsung-q5q.dtb"
+CMDLINE_FILE="$PAYLOAD_DIR/cmdline.txt"
+SUMS_FILE="$PAYLOAD_DIR/SHA256SUMS"
+KEXEC_BIN="$PAYLOAD_DIR/kexec"
+
+safe_output_path() {
+    output="$1"
+
+    if [ -e "$output" ]; then
+        [ -f "$output" ] && [ ! -L "$output" ] ||
+            fatal_early "refusing unsafe output path: $output"
+    fi
+}
+
+safe_output_path "$LOG_FILE"
+safe_output_path "$STATE_FILE"
+: >> "$LOG_FILE" || fatal_early "could not open launcher log"
 chmod 0600 "$LOG_FILE" 2>/dev/null || true
 
 log() {
-    printf '%s %s\n' "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown-time)" "$*" |
-        tee -a "$LOG_FILE"
+    printf '%s %s\n' \
+        "$(date '+%Y-%m-%dT%H:%M:%S%z' 2>/dev/null || echo unknown-time)" \
+        "$*" | tee -a "$LOG_FILE"
 }
 
 die() {
@@ -56,8 +93,8 @@ Required files:
   initramfs.cpio.gz
   sm8550-samsung-q5q.dtb
   cmdline.txt
+  kexec
   SHA256SUMS
-  kexec                    # static arm64 kexec-tools binary
 
 No command in this launcher writes a block-device partition.
 EOF
@@ -124,46 +161,77 @@ kernel_has_kexec() {
     return 1
 }
 
-find_kexec() {
-    for candidate in \
-        "$PAYLOAD_DIR/kexec" \
-        /system/bin/kexec \
-        /sbin/kexec
-    do
-        if [ -f "$candidate" ] && [ ! -L "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
+mark_manifest_name() {
+    manifest_name="$1"
 
-    return 1
+    case "$manifest_name" in
+        Image)
+            [ "$seen_image" -eq 0 ] || die "duplicate SHA256SUMS entry: Image"
+            seen_image=1
+            ;;
+        initramfs.cpio.gz)
+            [ "$seen_initrd" -eq 0 ] ||
+                die "duplicate SHA256SUMS entry: initramfs.cpio.gz"
+            seen_initrd=1
+            ;;
+        sm8550-samsung-q5q.dtb)
+            [ "$seen_dtb" -eq 0 ] ||
+                die "duplicate SHA256SUMS entry: sm8550-samsung-q5q.dtb"
+            seen_dtb=1
+            ;;
+        cmdline.txt)
+            [ "$seen_cmdline" -eq 0 ] ||
+                die "duplicate SHA256SUMS entry: cmdline.txt"
+            seen_cmdline=1
+            ;;
+        kexec)
+            [ "$seen_kexec" -eq 0 ] || die "duplicate SHA256SUMS entry: kexec"
+            seen_kexec=1
+            ;;
+        *) die "SHA256SUMS contains a disallowed path: $manifest_name" ;;
+    esac
 }
 
 validate_sums_manifest() {
-    [ -f "$SUMS_FILE" ] || die "missing SHA256SUMS"
-    [ ! -L "$SUMS_FILE" ] || die "SHA256SUMS must not be a symlink"
+    require_regular_file "$SUMS_FILE" "$MAX_SUMS_BYTES"
 
-    while IFS= read -r line; do
-        [ -n "$line" ] || continue
+    seen_image=0
+    seen_initrd=0
+    seen_dtb=0
+    seen_cmdline=0
+    seen_kexec=0
+    entry_count=0
 
-        name="${line#*  }"
-        [ "$name" != "$line" ] || name="${line#* *}"
-        name="${name#\*}"
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -n "$line" ] || die "SHA256SUMS contains a blank line"
 
-        case "$name" in
-            Image|initramfs.cpio.gz|sm8550-samsung-q5q.dtb|cmdline.txt|kexec)
-                ;;
-            *)
-                die "SHA256SUMS contains a disallowed path: $name"
-                ;;
+        set -- $line
+        [ "$#" -eq 2 ] || die "malformed SHA256SUMS line"
+
+        manifest_hash="$1"
+        manifest_name="${2#\*}"
+
+        [ "${#manifest_hash}" -eq 64 ] || die "SHA256SUMS contains a bad digest"
+        case "$manifest_hash" in
+            *[!0-9a-fA-F]*) die "SHA256SUMS contains a non-hex digest" ;;
         esac
+
+        mark_manifest_name "$manifest_name"
+        entry_count=$((entry_count + 1))
     done < "$SUMS_FILE"
+
+    [ "$entry_count" -eq 5 ] &&
+    [ "$seen_image" -eq 1 ] &&
+    [ "$seen_initrd" -eq 1 ] &&
+    [ "$seen_dtb" -eq 1 ] &&
+    [ "$seen_cmdline" -eq 1 ] &&
+    [ "$seen_kexec" -eq 1 ] ||
+        die "SHA256SUMS must contain exactly the five required payload files"
 
     (
         cd "$PAYLOAD_DIR"
         sha256sum -c SHA256SUMS
-    ) >> "$LOG_FILE" 2>&1 ||
-        die "payload SHA-256 verification failed"
+    ) >> "$LOG_FILE" 2>&1 || die "payload SHA-256 verification failed"
 }
 
 validate_dtb_identity() {
@@ -174,28 +242,30 @@ validate_dtb_identity() {
 }
 
 validate_cmdline() {
-    size="$(file_size "$CMDLINE_FILE")"
-    [ "$size" -le "$MAX_CMDLINE_BYTES" ] ||
+    cmdline_size="$(file_size "$CMDLINE_FILE")"
+    [ "$cmdline_size" -le "$MAX_CMDLINE_BYTES" ] ||
         die "kernel command line is too large"
 
-    if grep -q '[[:cntrl:]]' "$CMDLINE_FILE" 2>/dev/null; then
-        cleaned="$(tr -d '\r\n' < "$CMDLINE_FILE")"
-        printf '%s' "$cleaned" | grep -q '[[:cntrl:]]' 2>/dev/null &&
-            die "kernel command line contains control characters"
+    VALIDATED_CMDLINE="$(tr -d '\r\n' < "$CMDLINE_FILE")"
+    [ -n "$VALIDATED_CMDLINE" ] || die "kernel command line is empty"
+
+    removed_bytes=$((cmdline_size - ${#VALIDATED_CMDLINE}))
+    [ "$removed_bytes" -eq 0 ] || [ "$removed_bytes" -eq 1 ] ||
+        die "kernel command line must be exactly one line"
+
+    if printf '%s' "$VALIDATED_CMDLINE" | grep -q '[[:cntrl:]]' 2>/dev/null; then
+        die "kernel command line contains control characters"
     fi
 }
 
 validate_payload() {
-    kexec_bin="$1"
-
     require_regular_file "$IMAGE" "$MAX_IMAGE_BYTES"
     require_regular_file "$INITRD" "$MAX_INITRD_BYTES"
     require_regular_file "$DTB" "$MAX_DTB_BYTES"
     require_regular_file "$CMDLINE_FILE" "$MAX_CMDLINE_BYTES"
-    require_regular_file "$kexec_bin" "$MAX_KEXEC_BYTES"
+    require_regular_file "$KEXEC_BIN" "$MAX_KEXEC_BYTES"
 
-    chmod 0700 "$kexec_bin" 2>/dev/null ||
-        die "could not mark kexec executable"
+    chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
 
     validate_sums_manifest
     validate_dtb_identity
@@ -207,11 +277,8 @@ check_environment() {
     device_is_q5q || die "device identity is not q5q"
     kernel_has_kexec || die "running recovery kernel does not expose kexec support"
 
-    kexec_bin="$(find_kexec)" || die "no kexec binary found"
-    validate_payload "$kexec_bin"
-
-    "$kexec_bin" --version >> "$LOG_FILE" 2>&1 ||
-        die "kexec binary did not run"
+    validate_payload
+    "$KEXEC_BIN" --version >> "$LOG_FILE" 2>&1 || die "kexec binary did not run"
 
     log "environment and payload checks passed"
 }
@@ -224,28 +291,70 @@ kexec_loaded_value() {
     fi
 }
 
-load_payload() {
-    check_environment
+rollback_loaded_image() {
+    log "rolling back the loaded image"
+    "$KEXEC_BIN" -u >> "$LOG_FILE" 2>&1 ||
+        log "warning: kexec unload during rollback failed"
+}
 
-    loaded="$(kexec_loaded_value)"
-    [ "$loaded" != "1" ] ||
-        die "a kexec image is already loaded; use --unload first"
-
-    kexec_bin="$(find_kexec)"
-    cmdline="$(tr -d '\r\n' < "$CMDLINE_FILE")"
-
-    log "loading q5q second-stage kernel into RAM"
-    "$kexec_bin" -l "$IMAGE" \
-        --initrd="$INITRD" \
-        --dtb="$DTB" \
-        --command-line="$cmdline" >> "$LOG_FILE" 2>&1 ||
-        die "kexec load failed"
+create_state_manifest() {
+    TEMP_STATE="$PAYLOAD_DIR/.q5q-loaded.sha256.tmp.$$"
+    [ ! -e "$TEMP_STATE" ] && [ ! -L "$TEMP_STATE" ] ||
+        die "temporary state path already exists"
 
     (
         cd "$PAYLOAD_DIR"
         sha256sum Image initramfs.cpio.gz sm8550-samsung-q5q.dtb \
             cmdline.txt kexec
-    ) > "$STATE_FILE"
+    ) > "$TEMP_STATE" || {
+        rm -f "$TEMP_STATE"
+        die "could not create loaded-state manifest"
+    }
+    chmod 0600 "$TEMP_STATE" 2>/dev/null || true
+
+    require_regular_file "$TEMP_STATE" "$MAX_STATE_BYTES"
+    (
+        cd "$PAYLOAD_DIR"
+        sha256sum -c "${TEMP_STATE##*/}"
+    ) >> "$LOG_FILE" 2>&1 || {
+        rm -f "$TEMP_STATE"
+        die "payload changed while preparing the load"
+    }
+}
+
+load_payload() {
+    check_environment
+
+    loaded="$(kexec_loaded_value)"
+    [ "$loaded" != "1" ] || die "a kexec image is already loaded; use --unload first"
+
+    safe_output_path "$STATE_FILE"
+    rm -f "$STATE_FILE"
+    create_state_manifest
+
+    log "loading q5q second-stage kernel into RAM"
+    if ! "$KEXEC_BIN" -l "$IMAGE" \
+        --initrd="$INITRD" \
+        --dtb="$DTB" \
+        --command-line="$VALIDATED_CMDLINE" >> "$LOG_FILE" 2>&1; then
+        rm -f "$TEMP_STATE"
+        die "kexec load failed"
+    fi
+
+    if ! (
+        cd "$PAYLOAD_DIR"
+        sha256sum -c "${TEMP_STATE##*/}"
+    ) >> "$LOG_FILE" 2>&1; then
+        rollback_loaded_image
+        rm -f "$TEMP_STATE"
+        die "payload changed during kexec load"
+    fi
+
+    if ! mv "$TEMP_STATE" "$STATE_FILE"; then
+        rollback_loaded_image
+        rm -f "$TEMP_STATE"
+        die "could not commit loaded-state manifest"
+    fi
     chmod 0600 "$STATE_FILE" 2>/dev/null || true
 
     loaded="$(kexec_loaded_value)"
@@ -259,9 +368,10 @@ status_payload() {
     loaded="$(kexec_loaded_value)"
     log "kexec_loaded=$loaded"
 
-    if [ -f "$STATE_FILE" ]; then
+    if [ -e "$STATE_FILE" ]; then
+        require_regular_file "$STATE_FILE" "$MAX_STATE_BYTES"
         log "loaded-state manifest:"
-        cat "$STATE_FILE" | tee -a "$LOG_FILE"
+        tee -a "$LOG_FILE" < "$STATE_FILE"
     else
         log "no launcher state manifest exists"
     fi
@@ -269,39 +379,39 @@ status_payload() {
 
 unload_payload() {
     require_root
-    kexec_bin="$(find_kexec)" || die "no kexec binary found"
+    require_regular_file "$KEXEC_BIN" "$MAX_KEXEC_BYTES"
+    chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
 
-    "$kexec_bin" -u >> "$LOG_FILE" 2>&1 ||
-        die "kexec unload failed"
+    "$KEXEC_BIN" -u >> "$LOG_FILE" 2>&1 || die "kexec unload failed"
 
-    rm -f "$STATE_FILE"
+    if [ -e "$STATE_FILE" ]; then
+        require_regular_file "$STATE_FILE" "$MAX_STATE_BYTES"
+        rm -f "$STATE_FILE"
+    fi
     log "unloaded the staged kexec image"
 }
 
 execute_payload() {
     require_root
     device_is_q5q || die "device identity is not q5q"
-
-    [ -f "$STATE_FILE" ] ||
-        die "no launcher state exists; run --load first"
+    require_regular_file "$STATE_FILE" "$MAX_STATE_BYTES"
+    require_regular_file "$KEXEC_BIN" "$MAX_KEXEC_BYTES"
 
     (
         cd "$PAYLOAD_DIR"
-        sha256sum -c "$STATE_FILE"
-    ) >> "$LOG_FILE" 2>&1 ||
-        die "payload changed after it was loaded"
+        sha256sum -c "${STATE_FILE##*/}"
+    ) >> "$LOG_FILE" 2>&1 || die "payload changed after it was loaded"
 
     loaded="$(kexec_loaded_value)"
-    [ "$loaded" = "1" ] ||
-        die "kernel does not report a loaded kexec image"
+    [ "$loaded" = "1" ] || die "kernel does not report a loaded kexec image"
 
-    kexec_bin="$(find_kexec)" || die "no kexec binary found"
+    chmod 0700 "$KEXEC_BIN" 2>/dev/null || die "could not mark kexec executable"
 
     log "executing the loaded second-stage kernel now"
     sync
     sleep 1
 
-    "$kexec_bin" -e
+    "$KEXEC_BIN" -e
     die "kexec execute returned unexpectedly"
 }
 
