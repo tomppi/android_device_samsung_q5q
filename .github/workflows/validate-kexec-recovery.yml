@@ -22,8 +22,12 @@ jobs:
 
       - name: Check launcher and test syntax
         run: |
+          sh -n recovery/q5q-linux-boot-safe.sh
           sh -n recovery/q5q-linux-boot.sh
           bash -n recovery/test-q5q-linux-boot.sh
+
+      - name: Lint public escape gate
+        run: shellcheck -s sh recovery/q5q-linux-boot-safe.sh
 
       - name: Lint launcher
         id: lint_launcher
@@ -51,13 +55,20 @@ jobs:
       - name: Exercise launcher safety behavior
         run: bash recovery/test-q5q-linux-boot.sh
 
-      - name: Check product registration and recovery path
+      - name: Check product registration and recovery packaging
         run: |
           grep -q 'lineage_q5q_kexec.mk' AndroidProducts.mk
           grep -q 'lineage_q5q_kexec-userdebug' AndroidProducts.mk
           grep -q 'q5q_halium_debug.fragment' BoardConfig.mk
-          grep -Fq '$(TARGET_COPY_OUT_RECOVERY)/root/system/bin/q5q-linux-boot' \
+          grep -Fq 'PRODUCT_SOONG_NAMESPACES += device/samsung/q5q' \
             lineage_q5q_kexec.mk
+          grep -q 'q5q-linux-boot-safe' lineage_q5q_kexec.mk
+          grep -q 'q5q-linux-boot-backend' lineage_q5q_kexec.mk
+          grep -Fq 'name: "q5q-linux-boot-safe"' Android.bp
+          grep -Fq 'filename: "q5q-linux-boot"' Android.bp
+          grep -Fq 'name: "q5q-linux-boot-backend"' Android.bp
+          grep -Fq 'filename: ".q5q-linux-boot-backend"' Android.bp
+          grep -Fq 'recovery: true' Android.bp
           if grep -Eq '^[[:space:]]*PRODUCT_SUPPORTS_VERITY(_FEC)?[[:space:]]*:=' \
             BoardConfig.mk; then
             echo "Android 16 rejects legacy PRODUCT_SUPPORTS_VERITY variables." >&2
@@ -68,7 +79,7 @@ jobs:
         run: |
           if grep -En \
             'fastboot[[:space:]]+(flash|erase|format)|heimdall[[:space:]]+flash|dd[[:space:]].*of=/dev/block' \
-            recovery/q5q-linux-boot.sh; then
+            recovery/q5q-linux-boot-safe.sh recovery/q5q-linux-boot.sh; then
             echo "Recovery launcher must not contain partition-write commands." >&2
             exit 1
           fi
@@ -87,6 +98,8 @@ jobs:
             | grep -q 'verify_manifest_entry'
           grep -A25 '^execute_payload()' recovery/q5q-linux-boot.sh \
             | grep -q 'verify_manifest_entry'
+          grep -q 'q5q.escape_required=1' recovery/q5q-linux-boot-safe.sh
+          grep -q 'q5q.watchdog_required=1' recovery/q5q-linux-boot-safe.sh
           if grep -q '/system/bin/kexec\|/sbin/kexec' recovery/q5q-linux-boot.sh; then
             echo "The launcher must use only the hash-verified payload kexec binary." >&2
             exit 1
