@@ -62,8 +62,8 @@ jobs:
           grep -q 'q5q_halium_debug.fragment' BoardConfig.mk
           grep -Fq 'PRODUCT_SOONG_NAMESPACES += device/samsung/q5q' \
             lineage_q5q_kexec.mk
-          grep -q 'q5q-linux-boot-safe' lineage_q5q_kexec.mk
-          grep -q 'q5q-linux-boot-backend' lineage_q5q_kexec.mk
+          grep -Fq 'q5q-linux-boot-safe.recovery' lineage_q5q_kexec.mk
+          grep -Fq 'q5q-linux-boot-backend.recovery' lineage_q5q_kexec.mk
           grep -Fq 'name: "q5q-linux-boot-safe"' Android.bp
           grep -Fq 'filename: "q5q-linux-boot"' Android.bp
           grep -Fq 'name: "q5q-linux-boot-backend"' Android.bp
