@@ -10,6 +10,6 @@ $(call inherit-product, device/samsung/q5q/lineage_q5q.mk)
 
 PRODUCT_NAME := lineage_q5q_kexec
 
-PRODUCT_COPY_FILES += \
-    device/samsung/q5q/recovery/q5q-linux-boot-safe.sh:$(TARGET_COPY_OUT_RECOVERY)/root/system/bin/q5q-linux-boot \
-    device/samsung/q5q/recovery/q5q-linux-boot.sh:$(TARGET_COPY_OUT_RECOVERY)/root/system/bin/.q5q-linux-boot-backend
+PRODUCT_PACKAGES += \
+    q5q-linux-boot-safe \
+    q5q-linux-boot-backend
