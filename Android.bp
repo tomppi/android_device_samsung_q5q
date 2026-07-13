@@ -6,6 +6,20 @@
 soong_namespace {
 }
 
+sh_binary {
+    name: "q5q-linux-boot-safe",
+    src: "recovery/q5q-linux-boot-safe.sh",
+    filename: "q5q-linux-boot",
+    recovery: true,
+}
+
+sh_binary {
+    name: "q5q-linux-boot-backend",
+    src: "recovery/q5q-linux-boot.sh",
+    filename: ".q5q-linux-boot-backend",
+    recovery: true,
+}
+
 install_symlink {
     name: "firmware_wlanmdsp.otaupdate_symlink",
     vendor: true,

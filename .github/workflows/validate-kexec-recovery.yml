@@ -1,0 +1,106 @@
+name: Validate q5q kexec recovery
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Install shell validation tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq shellcheck util-linux
+
+      - name: Check launcher and test syntax
+        run: |
+          sh -n recovery/q5q-linux-boot-safe.sh
+          sh -n recovery/q5q-linux-boot.sh
+          bash -n recovery/test-q5q-linux-boot.sh
+
+      - name: Lint public escape gate
+        run: shellcheck -s sh recovery/q5q-linux-boot-safe.sh
+
+      - name: Lint launcher
+        id: lint_launcher
+        shell: bash
+        run: |
+          set +e
+          shellcheck -f gcc -s sh recovery/q5q-linux-boot.sh \
+            > q5q-launcher-shellcheck.txt 2>&1
+          status=$?
+          cat q5q-launcher-shellcheck.txt
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Lint launcher behavioral test
+        run: shellcheck recovery/test-q5q-linux-boot.sh
+
+      - name: Upload launcher lint diagnostics
+        if: always() && steps.lint_launcher.outputs.status != '0'
+        uses: actions/upload-artifact@v4
+        with:
+          name: q5q-launcher-shellcheck
+          path: q5q-launcher-shellcheck.txt
+          if-no-files-found: error
+
+      - name: Exercise launcher safety behavior
+        run: bash recovery/test-q5q-linux-boot.sh
+
+      - name: Check product registration and recovery packaging
+        run: |
+          grep -q 'lineage_q5q_kexec.mk' AndroidProducts.mk
+          grep -q 'lineage_q5q_kexec-userdebug' AndroidProducts.mk
+          grep -q 'q5q_halium_debug.fragment' BoardConfig.mk
+          grep -Fq 'PRODUCT_SOONG_NAMESPACES += device/samsung/q5q' \
+            lineage_q5q_kexec.mk
+          grep -Fq 'q5q-linux-boot-safe.recovery' lineage_q5q_kexec.mk
+          grep -Fq 'q5q-linux-boot-backend.recovery' lineage_q5q_kexec.mk
+          grep -Fq 'name: "q5q-linux-boot-safe"' Android.bp
+          grep -Fq 'filename: "q5q-linux-boot"' Android.bp
+          grep -Fq 'name: "q5q-linux-boot-backend"' Android.bp
+          grep -Fq 'filename: ".q5q-linux-boot-backend"' Android.bp
+          grep -Fq 'recovery: true' Android.bp
+          if grep -Eq '^[[:space:]]*PRODUCT_SUPPORTS_VERITY(_FEC)?[[:space:]]*:=' \
+            BoardConfig.mk; then
+            echo "Android 16 rejects legacy PRODUCT_SUPPORTS_VERITY variables." >&2
+            exit 1
+          fi
+
+      - name: Check launcher safety boundary
+        run: |
+          if grep -En \
+            'fastboot[[:space:]]+(flash|erase|format)|heimdall[[:space:]]+flash|dd[[:space:]].*of=/dev/block' \
+            recovery/q5q-linux-boot-safe.sh recovery/q5q-linux-boot.sh; then
+            echo "Recovery launcher must not contain partition-write commands." >&2
+            exit 1
+          fi
+
+      - name: Check guarded payload contract
+        run: |
+          grep -q -- '--execute requires the literal second argument --confirm' \
+            recovery/q5q-linux-boot.sh
+          grep -q 'payload changed after it was loaded' recovery/q5q-linux-boot.sh
+          grep -q 'payload changed during kexec load' recovery/q5q-linux-boot.sh
+          grep -q 'must contain exactly the five required payload files' \
+            recovery/q5q-linux-boot.sh
+          grep -q 'rolling back the loaded image' recovery/q5q-linux-boot.sh
+          grep -q '^verify_manifest_entry()' recovery/q5q-linux-boot.sh
+          grep -A18 '^unload_payload()' recovery/q5q-linux-boot.sh \
+            | grep -q 'verify_manifest_entry'
+          grep -A25 '^execute_payload()' recovery/q5q-linux-boot.sh \
+            | grep -q 'verify_manifest_entry'
+          grep -q 'q5q.escape_required=1' recovery/q5q-linux-boot-safe.sh
+          grep -q 'q5q.watchdog_required=1' recovery/q5q-linux-boot-safe.sh
+          if grep -q '/system/bin/kexec\|/sbin/kexec' recovery/q5q-linux-boot.sh; then
+            echo "The launcher must use only the hash-verified payload kexec binary." >&2
+            exit 1
+          fi
