@@ -2,7 +2,11 @@ name: Validate q5q kexec recovery
 
 on:
   push:
+    branches:
+      - agent/q5q-kexec-recovery
   pull_request:
+    branches:
+      - halium-15.0
 
 permissions:
   contents: read
