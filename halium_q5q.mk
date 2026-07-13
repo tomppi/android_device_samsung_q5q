@@ -1,5 +1,10 @@
-# Minimal Halium 15 product for Samsung Galaxy Z Fold5 (q5q / SM-F946B).
-# This target is for early hybris-boot and Droidian bring-up, not a full ROM.
+# Downstream Halium 15 kernel product for Samsung Galaxy Z Fold5
+# (q5q / SM-F946B).
+#
+# This target is not a flashable ROM or recovery image. It exists to build the
+# q5q downstream kernel, matching modules, DTB and DTBO artifacts with
+# q5q_defconfig + q5q_halium.fragment. q5q-halium-port packages those artifacts
+# with a Droidian initramfs as a direct recovery-partition boot image.
 
 $(call inherit-product, $(SRC_TARGET_DIR)/product/core_64_bit.mk)
 $(call inherit-product, $(SRC_TARGET_DIR)/product/base.mk)
@@ -19,5 +24,5 @@ PRODUCT_SOONG_NAMESPACES += \
 PRODUCT_PACKAGES += \
     init.halium.q5q.rc
 
-# Keep the first image deliberately small. Android vendor-container and UI
-# integration will be added after kernel + USB-network shell bring-up works.
+# Android-container and UI integration are added only after the direct recovery
+# kernel, initramfs, exact module tree and USB/SSH bring-up have been validated.

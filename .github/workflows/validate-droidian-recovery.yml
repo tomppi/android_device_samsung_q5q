@@ -1,0 +1,54 @@
+name: Validate q5q direct Droidian recovery product
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Check product separation
+        run: |
+          grep -Fq 'TARGET_KERNEL_CONFIG := q5q_defconfig' BoardConfig.mk
+          grep -A4 'filter lineage_q5q_kexec' BoardConfig.mk \
+            | grep -Fq 'q5q_halium_debug.fragment'
+          grep -A8 'filter halium_q5q' BoardConfig.mk \
+            | grep -Fq 'q5q_halium.fragment'
+          grep -A8 'filter halium_q5q' BoardConfig.mk \
+            | grep -Fq 'androidboot.halium=1'
+
+      - name: Protect normal Lineage settings
+        run: |
+          if grep -Eq '^[[:space:]]*BOARD_AVB_ENABLE[[:space:]]*:=[[:space:]]*false' BoardConfig.mk; then
+            echo 'Normal q5q products must inherit AVB settings.' >&2
+            exit 1
+          fi
+          if grep -Eq '^[[:space:]]*PRODUCT_FULL_TREBLE_OVERRIDE[[:space:]]*:=' BoardConfig.mk; then
+            echo 'Treble product policy must not be applied globally from BoardConfig.mk.' >&2
+            exit 1
+          fi
+          if grep -Eq '^[[:space:]]*BOARD_VNDK_VERSION[[:space:]]*:=' BoardConfig.mk; then
+            echo 'VNDK policy must not be applied globally from BoardConfig.mk.' >&2
+            exit 1
+          fi
+
+      - name: Check Halium staging product
+        run: |
+          grep -Fq 'PRODUCT_NAME := halium_q5q' halium_q5q.mk
+          grep -Fq 'not a flashable ROM or recovery image' halium_q5q.mk
+          grep -Fq 'q5q_defconfig + q5q_halium.fragment' halium_q5q.mk
+          grep -Fq 'halium_q5q-userdebug' AndroidProducts.mk
+
+      - name: Preserve legacy path without making it default
+        run: |
+          grep -Fq 'lineage_q5q_kexec-userdebug' AndroidProducts.mk
+          grep -Fq 'q5q-linux-boot-safe.recovery' lineage_q5q_kexec.mk
+          grep -Fq 'q5q-linux-boot-backend.recovery' lineage_q5q_kexec.mk
