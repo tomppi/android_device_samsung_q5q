@@ -4,9 +4,6 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 
-# Halium 15 board configuration for q5q.
-# Keep the current SM8550 partition, GKI, and boot-image definitions, then
-# apply only the overrides required for an unlocked Halium development build.
 include device/samsung/sm8550-common/BoardConfigCommon.mk
 
 DEVICE_PATH := device/samsung/q5q
@@ -17,16 +14,26 @@ TARGET_OTA_ASSERT_DEVICE := q5q
 # Display
 TARGET_SCREEN_DENSITY := 420
 
-# Kernel: build from the checked-out source tree; never use an absolute path.
-# Lineage 23.2 treats TARGET_KERNEL_CONFIG as a list: first the base defconfig,
-# then any fragments that should be merged into the final .config.
-TARGET_KERNEL_CONFIG := q5q_defconfig q5q_halium.fragment
+# Kernel
+# Keep the ordinary Lineage products on the upstream q5q configuration. The
+# two development products add only the fragment required for their own job:
+# - lineage_q5q_kexec: first-stage recovery diagnostics and kexec support;
+# - halium_q5q: downstream Halium/Droidian kernel used by the direct recovery
+#   image builder in q5q-halium-port.
+TARGET_KERNEL_CONFIG := q5q_defconfig
 
-# The dedicated recovery product requests the development-only kexec/pstore
-# fragment. Ordinary q5q and Halium products remain unchanged.
 ifneq ($(filter lineage_q5q_kexec,$(TARGET_PRODUCT)),)
 TARGET_KERNEL_CONFIG += q5q_halium_debug.fragment
 BOARD_KERNEL_CMDLINE += panic=10 ignore_loglevel
+endif
+
+ifneq ($(filter halium_q5q,$(TARGET_PRODUCT)),)
+TARGET_KERNEL_CONFIG += q5q_halium.fragment
+BOARD_KERNEL_CMDLINE += \
+    console=tty0 \
+    androidboot.selinux=permissive \
+    androidboot.veritymode=disabled \
+    androidboot.halium=1
 endif
 
 # Kernel modules
@@ -67,27 +74,9 @@ TARGET_KERNEL_EXT_MODULES := \
   qcom/opensource/wlan/qcacld-3.0/.qca6490 \
   qcom/opensource/bt-kernel
 
-# Halium boot arguments. The common tree already supplies the q5q USB,
-# firmware, boot-header-v4, GKI, init_boot, vendor_boot and partition settings.
-BOARD_KERNEL_CMDLINE += \
-    console=tty0 \
-    androidboot.selinux=permissive \
-    androidboot.veritymode=disabled \
-    androidboot.halium=1
-
-# Development image policy. Ramdisk placement remains inherited from the
-# current q5q GKI layout until boot/init_boot/vendor_boot packaging is proven.
-# Android 16 no longer accepts the legacy PRODUCT_SUPPORTS_VERITY variables;
-# the inherited AVB 2.0 configuration is controlled only through BOARD_AVB_*.
-BOARD_AVB_ENABLE := false
-
-# Recovery remains available as a separate build target.
+# Recovery
 TARGET_RECOVERY_DEFAULT_ROTATION := ROTATION_LEFT
 BOARD_RECOVERYIMAGE_PARTITION_SIZE := 109576192
-
-# Treble/vendor compatibility
-PRODUCT_FULL_TREBLE_OVERRIDE := true
-BOARD_VNDK_VERSION := current
 
 # Properties
 TARGET_VENDOR_PROP += $(DEVICE_PATH)/vendor.prop
