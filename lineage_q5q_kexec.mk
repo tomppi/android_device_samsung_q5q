@@ -12,9 +12,12 @@ PRODUCT_NAME := lineage_q5q_kexec
 
 # Android.bp declares an explicit namespace in this device tree. Export it to
 # the Make product namespace so PRODUCT_PACKAGES can resolve the recovery-only
-# launcher modules below.
+# launcher variants below.
 PRODUCT_SOONG_NAMESPACES += device/samsung/q5q
 
+# recovery: true creates recovery-only Soong variants whose Make-visible module
+# names carry the .recovery suffix. Their installed filenames remain the values
+# declared by filename: in Android.bp.
 PRODUCT_PACKAGES += \
-    q5q-linux-boot-safe \
-    q5q-linux-boot-backend
+    q5q-linux-boot-safe.recovery \
+    q5q-linux-boot-backend.recovery
